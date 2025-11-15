@@ -1,5 +1,6 @@
 import { Canvas } from '@react-three/fiber';
-import { GizmoHelper, GizmoViewport, Grid, OrbitControls, TransformControls } from '@react-three/drei';
+import { GizmoHelper, GizmoViewport, Grid, Html, Line, OrbitControls, TransformControls } from '@react-three/drei';
+import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { CSG } from 'three-csg-ts';
 import * as THREE from 'three';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -63,6 +64,8 @@ const HANDLE_MODES = {
   resize: 'resize',
 };
 
+const KEY_STEP = 0.25;
+
 const positionToWorld = ({ x, y, z }) => ({
   x,
   y: z,
@@ -79,6 +82,8 @@ export default function App() {
   const [primitives, setPrimitives] = useState(DEFAULT_PRIMITIVES);
   const [selectedId, setSelectedId] = useState(DEFAULT_PRIMITIVES[0]?.id ?? null);
   const [handleMode, setHandleMode] = useState(HANDLE_MODES.move);
+  const [showOrigin, setShowOrigin] = useState(true);
+  const [ghostOpacity, setGhostOpacity] = useState(0.8);
 
   const selectedPrimitive = primitives.find((primitive) => primitive.id === selectedId) ?? null;
 
@@ -149,6 +154,62 @@ export default function App() {
     });
   }, []);
 
+  const exportToSTL = useCallback(() => {
+    const mesh = buildCombinedMesh(primitives);
+    if (!mesh) return;
+
+    const exporter = new STLExporter();
+    const stl = exporter.parse(mesh);
+    const blob = new Blob([stl], { type: 'model/stl' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `cad3d-object-${Date.now()}.stl`;
+    document.body.appendChild(link);
+    link.click();
+    requestAnimationFrame(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    });
+  }, [primitives]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (!selectedId) return;
+      if (document.activeElement) {
+        const tag = document.activeElement.tagName;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || document.activeElement.isContentEditable) {
+          return;
+        }
+      }
+
+      const arrowKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+      if (!arrowKeys.includes(event.key)) return;
+
+      event.preventDefault();
+
+      const step = event.shiftKey ? KEY_STEP * 2 : KEY_STEP;
+      const deltas = { x: 0, y: 0, z: 0 };
+      if (event.key === 'ArrowUp') deltas.z = step;
+      if (event.key === 'ArrowDown') deltas.z = -step;
+      if (event.key === 'ArrowLeft') deltas.x = -step;
+      if (event.key === 'ArrowRight') deltas.x = step;
+
+      patchPrimitive(selectedId, (current) => ({
+        ...current,
+        position: {
+          ...current.position,
+          x: roundValue(current.position.x + deltas.x),
+          y: roundValue(current.position.y + deltas.y),
+          z: roundValue(current.position.z + deltas.z),
+        },
+      }));
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedId, patchPrimitive]);
+
   return (
     <div className="workspace">
       <header className="workspace__header">
@@ -157,16 +218,21 @@ export default function App() {
           <h1>Primitive Composer</h1>
         </div>
         <div className="header__actions">
-          {Object.keys(TYPE_PRESETS).map((type) => (
-            <button
-              key={type}
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => addPrimitive(type)}
-            >
-              Add {TYPE_PRESETS[type].label}
-            </button>
-          ))}
+          <div className="header__actions-group">
+            {Object.keys(TYPE_PRESETS).map((type) => (
+              <button
+                key={type}
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => addPrimitive(type)}
+              >
+                Add {TYPE_PRESETS[type].label}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="btn btn--primary" onClick={exportToSTL} disabled={!primitives.length}>
+            Export STL
+          </button>
         </div>
       </header>
 
@@ -216,20 +282,40 @@ export default function App() {
 
         <div className="viewport">
           <div className="viewport__toolbar">
-            <div className="handle-toggle">
-              {[
-                { label: 'Move', value: HANDLE_MODES.move },
-                { label: 'Resize', value: HANDLE_MODES.resize },
-              ].map((mode) => (
-                <button
-                  key={mode.value}
-                  type="button"
-                  className={`handle-toggle__btn ${handleMode === mode.value ? 'is-active' : ''}`}
-                  onClick={() => setHandleMode(mode.value)}
-                >
-                  {mode.label}
-                </button>
-              ))}
+            <div className="viewport__toggles">
+              <div className="handle-toggle">
+                {[
+                  { label: 'Move', value: HANDLE_MODES.move },
+                  { label: 'Resize', value: HANDLE_MODES.resize },
+                ].map((mode) => (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    className={`handle-toggle__btn ${handleMode === mode.value ? 'is-active' : ''}`}
+                    onClick={() => setHandleMode(mode.value)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className={`btn btn--ghost btn--tiny ${showOrigin ? 'is-active' : ''}`}
+                onClick={() => setShowOrigin((value) => !value)}
+              >
+                {showOrigin ? 'Hide' : 'Show'} Origin
+              </button>
+              <label className="opacity-slider">
+                <span>Ghost Opacity</span>
+                <input
+                  type="range"
+                  min="0.05"
+                  max="0.8"
+                  step="0.05"
+                  value={ghostOpacity}
+                  onChange={(event) => setGhostOpacity(parseNumber(event.target.value, ghostOpacity))}
+                />
+              </label>
             </div>
           </div>
           <ModelingViewport
@@ -238,6 +324,8 @@ export default function App() {
             onSelectPrimitive={setSelectedId}
             handleMode={handleMode}
             onTransformPrimitive={handleTransformPrimitive}
+            showOrigin={showOrigin}
+            ghostOpacity={ghostOpacity}
           />
           {!primitives.length && (
             <div className="viewport__empty">
@@ -262,7 +350,15 @@ export default function App() {
   );
 }
 
-function ModelingViewport({ primitives, selectedId, onSelectPrimitive, handleMode, onTransformPrimitive }) {
+function ModelingViewport({
+  primitives,
+  selectedId,
+  onSelectPrimitive,
+  handleMode,
+  onTransformPrimitive,
+  showOrigin,
+  ghostOpacity,
+}) {
   const orbitControlsRef = useRef(null);
   const handleDeselect = useCallback(() => {
     onSelectPrimitive(null);
@@ -280,7 +376,7 @@ function ModelingViewport({ primitives, selectedId, onSelectPrimitive, handleMod
       />
       <pointLight position={[-8, 6, -6]} intensity={0.35} color="#82cfff" />
       <group>
-        <CombinedSolid primitives={primitives} />
+          <CombinedSolid primitives={primitives} ghostOpacity={ghostOpacity} />
         <group>
           {primitives.map((primitive) => (
             <EditablePrimitive
@@ -291,6 +387,7 @@ function ModelingViewport({ primitives, selectedId, onSelectPrimitive, handleMod
               onSelect={onSelectPrimitive}
               onTransform={onTransformPrimitive}
               orbitControlsRef={orbitControlsRef}
+              ghostOpacity={ghostOpacity}
             />
           ))}
         </group>
@@ -310,11 +407,20 @@ function ModelingViewport({ primitives, selectedId, onSelectPrimitive, handleMod
           labels={['X', 'Z', 'Y']}
         />
       </GizmoHelper>
+      {showOrigin && <OriginIndicator />}
     </Canvas>
   );
 }
 
-function EditablePrimitive({ primitive, isSelected, handleMode, onSelect, onTransform, orbitControlsRef }) {
+function EditablePrimitive({
+  primitive,
+  isSelected,
+  handleMode,
+  onSelect,
+  onTransform,
+  orbitControlsRef,
+  ghostOpacity,
+}) {
   const meshRef = useRef(null);
   const controlsRef = useRef(null);
   const sessionRef = useRef(null);
@@ -351,6 +457,7 @@ function EditablePrimitive({ primitive, isSelected, handleMode, onSelect, onTran
       primitive={primitive}
       onPointerDown={handlePointerDown}
       isSelected={isSelected}
+      ghostOpacity={ghostOpacity}
     />
   );
 
@@ -381,26 +488,33 @@ function EditablePrimitive({ primitive, isSelected, handleMode, onSelect, onTran
   };
 
   return (
-    <TransformControls
-      ref={controlsRef}
-      mode={mode}
-      showX
-      showY
-      showZ
-      size={handleMode === HANDLE_MODES.move ? 1 : 0.9}
-      onMouseDown={() => {
-        if (mode === 'scale') {
-          sessionRef.current = { startDimensions: { ...primitive.dimensions } };
-        }
-      }}
-      onMouseUp={() => {
-        finalizeResize();
-        finalizeTranslate();
-        sessionRef.current = null;
-      }}
-    >
-      {baseMesh}
-    </TransformControls>
+    <>
+      <TransformControls
+        ref={controlsRef}
+        mode={mode}
+        showX
+        showY
+        showZ
+        size={handleMode === HANDLE_MODES.move ? 1 : 0.9}
+        onMouseDown={() => {
+          if (mode === 'scale') {
+            sessionRef.current = { startDimensions: { ...primitive.dimensions } };
+          }
+        }}
+        onMouseUp={() => {
+          finalizeResize();
+          finalizeTranslate();
+          sessionRef.current = null;
+        }}
+      >
+        {baseMesh}
+      </TransformControls>
+      {handleMode === HANDLE_MODES.resize ? (
+        <DimensionIndicators primitive={primitive} onChange={onTransform} />
+      ) : (
+        <DistanceFromOriginIndicators primitive={primitive} onChange={onTransform} />
+      )}
+    </>
   );
 }
 
@@ -574,9 +688,17 @@ function PrimitiveInspector({ primitive, onChange }) {
   );
 }
 
-function CombinedSolid({ primitives }) {
+function CombinedSolid({ primitives, ghostOpacity }) {
   const mesh = useMemo(() => buildCombinedMesh(primitives), [primitives]);
   if (!mesh) return null;
+
+  const solidOpacity = Math.min(1, Math.max(ghostOpacity + 0.25, 0.25));
+  if (mesh.material) {
+    mesh.material.opacity = solidOpacity;
+    mesh.material.transparent = solidOpacity < 0.99;
+    mesh.material.needsUpdate = true;
+  }
+
   return <primitive object={mesh} />;
 }
 
@@ -649,7 +771,7 @@ function computeScaledDimensions(type, baseDimensions, scale) {
   };
 }
 
-const PrimitiveGhost = forwardRef(function PrimitiveGhost({ primitive, onPointerDown, isSelected }, ref) {
+const PrimitiveGhost = forwardRef(function PrimitiveGhost({ primitive, onPointerDown, isSelected, ghostOpacity }, ref) {
   const { type, position, dimensions, operation } = primitive;
   const isSubtract = operation === 'subtract';
   const worldPosition = positionToWorld(position);
@@ -659,7 +781,7 @@ const PrimitiveGhost = forwardRef(function PrimitiveGhost({ primitive, onPointer
   };
 
   const color = isSubtract ? '#ff4d6d' : '#26d07c';
-  const opacity = isSelected ? 0.3 : 0.18;
+  const opacity = isSelected ? Math.min(ghostOpacity + 0.1, 1) : 0;
   const wireframe = !isSelected;
 
   if (type === 'box') {
@@ -687,3 +809,408 @@ const PrimitiveGhost = forwardRef(function PrimitiveGhost({ primitive, onPointer
     </mesh>
   );
 });
+
+function DimensionIndicators({ primitive, onChange }) {
+  const { type, dimensions, position } = primitive;
+  const worldPosition = positionToWorld(position);
+  const arrows = [];
+
+  const updateDimensions = (nextDimensions) => {
+    onChange(primitive.id, {
+      dimensions: {
+        ...primitive.dimensions,
+        ...nextDimensions,
+      },
+    });
+  };
+
+  const clampSize = (value, min = 0.1) => roundValue(Math.max(min, parseNumber(value, 0)));
+
+  if (type === 'box') {
+    const halfWidth = dimensions.width / 2;
+    const halfDepth = dimensions.depth / 2;
+    const halfHeight = dimensions.height / 2;
+    const topY = worldPosition.y + halfHeight;
+    const bottomY = worldPosition.y - halfHeight;
+
+    const widthOffsetZ = worldPosition.z + halfDepth + 0.6;
+    const depthOffsetX = worldPosition.x + halfWidth + 0.6;
+    const heightOffsetX = worldPosition.x - halfWidth - 0.6;
+    const heightOffsetZ = worldPosition.z - halfDepth - 0.4;
+
+    arrows.push(
+      <DimensionArrow
+        key="box-width"
+        label="Width (X)"
+        value={roundValue(dimensions.width)}
+        start={[worldPosition.x - halfWidth, topY + 0.2, widthOffsetZ]}
+        end={[worldPosition.x + halfWidth, topY + 0.2, widthOffsetZ]}
+        onCommit={(value) => updateDimensions({ width: clampSize(value) })}
+      />
+    );
+
+    arrows.push(
+      <DimensionArrow
+        key="box-depth"
+        label="Depth (Y)"
+        value={roundValue(dimensions.depth)}
+        start={[depthOffsetX, topY + 0.2, worldPosition.z - halfDepth]}
+        end={[depthOffsetX, topY + 0.2, worldPosition.z + halfDepth]}
+        onCommit={(value) => updateDimensions({ depth: clampSize(value) })}
+      />
+    );
+
+    arrows.push(
+      <DimensionArrow
+        key="box-height"
+        label="Height (Z)"
+        value={roundValue(dimensions.height)}
+        start={[heightOffsetX, bottomY, heightOffsetZ]}
+        end={[heightOffsetX, topY, heightOffsetZ]}
+        onCommit={(value) => updateDimensions({ height: clampSize(value) })}
+      />
+    );
+  }
+
+  if (type === 'sphere') {
+    const radius = dimensions.radius;
+    const diameter = roundValue(radius * 2);
+    const offsetX = worldPosition.x + radius + 0.8;
+    arrows.push(
+      <DimensionArrow
+        key="sphere-diameter"
+        label="Diameter"
+        value={diameter}
+        start={[offsetX, worldPosition.y - radius, worldPosition.z]}
+        end={[offsetX, worldPosition.y + radius, worldPosition.z]}
+        onCommit={(value) => updateDimensions({ radius: clampSize(value, 0.2) / 2 })}
+      />
+    );
+  }
+
+  if (type === 'cylinder') {
+    const halfHeight = dimensions.height / 2;
+    const radius = dimensions.radius;
+    const diameter = roundValue(radius * 2);
+    const topY = worldPosition.y + halfHeight;
+    const bottomY = worldPosition.y - halfHeight;
+
+    const diameterOffsetY = topY + 0.3;
+
+    arrows.push(
+      <DimensionArrow
+        key="cylinder-height"
+        label="Height (Z)"
+        value={roundValue(dimensions.height)}
+        start={[worldPosition.x + radius + 0.7, bottomY, worldPosition.z]}
+        end={[worldPosition.x + radius + 0.7, topY, worldPosition.z]}
+        onCommit={(value) => updateDimensions({ height: clampSize(value) })}
+      />
+    );
+
+    arrows.push(
+      <DimensionArrow
+        key="cylinder-diameter"
+        label="Diameter"
+        value={diameter}
+        start={[worldPosition.x - radius, diameterOffsetY, worldPosition.z]}
+        end={[worldPosition.x + radius, diameterOffsetY, worldPosition.z]}
+        onCommit={(value) => updateDimensions({ radius: clampSize(value, 0.2) / 2 })}
+      />
+    );
+  }
+
+  return <group>{arrows}</group>;
+}
+
+function DistanceFromOriginIndicators({ primitive, onChange }) {
+  const worldPosition = positionToWorld(primitive.position);
+  const axes = [
+    {
+      key: 'dist-x',
+      label: 'X',
+      color: '#ff5370',
+      start: [0, 0.02, 0],
+      end: [worldPosition.x, 0.02, 0],
+      value: roundValue(primitive.position.x),
+      unit: [1, 0, 0],
+      axisKey: 'x',
+    },
+    {
+      key: 'dist-y',
+      label: 'Y',
+      color: '#82aaff',
+      start: [0, 0.02, 0],
+      end: [0, 0.02, worldPosition.z],
+      value: roundValue(primitive.position.y),
+      unit: [0, 0, 1],
+      axisKey: 'y',
+    },
+    {
+      key: 'dist-z',
+      label: 'Z',
+      color: '#48c0b5',
+      start: [0, 0, 0],
+      end: [0, worldPosition.y, 0],
+      value: roundValue(primitive.position.z),
+      unit: [0, 1, 0],
+      axisKey: 'z',
+    },
+  ];
+
+  const updatePosition = useCallback(
+    (axisKey, nextValue) => {
+      onChange(primitive.id, {
+        position: {
+          ...primitive.position,
+          [axisKey]: roundValue(nextValue),
+        },
+      });
+    },
+    [primitive, onChange]
+  );
+
+  return (
+    <group>
+      {axes.map((axis) => (
+        <DistanceAxisIndicator
+          key={axis.key}
+          axis={axis}
+          onCommit={(value) => updatePosition(axis.axisKey, value)}
+        />
+      ))}
+    </group>
+  );
+}
+
+function DistanceAxisIndicator({ axis, onCommit }) {
+  const startVec = new THREE.Vector3(...axis.start);
+  const endVec = new THREE.Vector3(...axis.end);
+  const delta = endVec.clone().sub(startVec);
+  const hasMagnitude = delta.length() > 0.001;
+  const actualEndVector = hasMagnitude
+    ? endVec
+    : startVec.clone().add(new THREE.Vector3(...axis.unit).multiplyScalar(0.001));
+  const actualEnd = actualEndVector.toArray();
+  const direction = actualEndVector.clone().sub(startVec).normalize();
+  const midpoint = startVec.clone().add(actualEndVector).multiplyScalar(0.5).toArray();
+
+  return (
+    <group>
+      <Line
+        points={[axis.start, actualEnd]}
+        color={axis.color}
+        lineWidth={1}
+        dashed
+        depthTest={false}
+        renderOrder={11}
+      />
+      <ArrowHead position={actualEnd} direction={direction} alwaysOnTop color={axis.color} />
+      <DistanceValueLabel label={axis.label} value={axis.value} onCommit={onCommit} position={midpoint} />
+    </group>
+  );
+}
+
+function DistanceValueLabel({ label, value, onCommit, position }) {
+  const [draft, setDraft] = useState(String(value));
+  const [isEditing, setEditing] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleChange = (event) => {
+    const nextValue = event.target.value;
+    setDraft(nextValue);
+    onCommit(parseNumber(nextValue, value));
+  };
+
+  const handleBlur = () => {
+    setEditing(false);
+  };
+
+  return (
+    <Html
+      position={position}
+      center
+      className={`dimension-label distance-label ${isEditing ? 'dimension-label--editing' : ''}`}
+      distanceFactor={14}
+    >
+      <span className="distance-label__axis">{label}</span>
+      {isEditing ? (
+        <input
+          ref={inputRef}
+          type="number"
+          step="0.1"
+          value={draft}
+          onChange={handleChange}
+          onBlur={handleBlur}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.currentTarget.blur();
+            } else if (event.key === 'Escape') {
+              setDraft(String(value));
+              setEditing(false);
+            }
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {value}
+        </button>
+      )}
+    </Html>
+  );
+}
+
+function DimensionArrow({ start, end, label, value, onCommit }) {
+  const [draft, setDraft] = useState(String(value));
+  const [isEditing, setEditing] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const startVec = useMemo(() => new THREE.Vector3(...start), [start]);
+  const endVec = useMemo(() => new THREE.Vector3(...end), [end]);
+  const direction = useMemo(() => endVec.clone().sub(startVec).normalize(), [startVec, endVec]);
+  const midpoint = useMemo(() => startVec.clone().add(endVec).multiplyScalar(0.5).toArray(), [startVec, endVec]);
+
+  const commitValue = () => {
+    onCommit(parseNumber(draft, value));
+  };
+
+  const handleBlur = () => {
+    commitValue();
+    setEditing(false);
+  };
+
+  const handleChange = (event) => {
+    const nextValue = event.target.value;
+    setDraft(nextValue);
+    onCommit(parseNumber(nextValue, value));
+  };
+
+  return (
+    <group>
+      <Line points={[start, end]} color="#f9c76b" lineWidth={1} dashed dashSize={0.2} gapSize={0.1} />
+      <ArrowHead position={start} direction={direction} invert />
+      <ArrowHead position={end} direction={direction} />
+      <Html
+        position={midpoint}
+        center
+        className={`dimension-label ${isEditing ? 'dimension-label--editing' : ''}`}
+        distanceFactor={14}
+      >
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            type="number"
+            step="0.1"
+            value={draft}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                commitValue();
+              } else if (event.key === 'Escape') {
+                setDraft(String(value));
+                setEditing(false);
+              }
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {value}
+          </button>
+        )}
+      </Html>
+    </group>
+  );
+}
+
+function ArrowHead({ position, direction, invert = false, alwaysOnTop = false, color = '#f9c76b' }) {
+  const quaternion = useMemo(() => {
+    const target = direction.clone().multiplyScalar(invert ? -1 : 1).normalize();
+    const quat = new THREE.Quaternion();
+    quat.setFromUnitVectors(new THREE.Vector3(0, 1, 0), target);
+    return quat;
+  }, [direction, invert]);
+
+  return (
+    <mesh position={position} quaternion={quaternion} renderOrder={alwaysOnTop ? 10 : 0}>
+      <coneGeometry args={[0.07, 0.25, 16]} />
+      <meshStandardMaterial color={color} depthTest={!alwaysOnTop} depthWrite={!alwaysOnTop} />
+    </mesh>
+  );
+}
+
+function OriginIndicator() {
+  const axisLength = 2.5;
+  const axes = [
+    { label: 'X', color: '#ff5370', dir: [axisLength, 0, 0] },
+    { label: 'Z', color: '#48c0b5', dir: [0, axisLength, 0] },
+    { label: 'Y', color: '#82aaff', dir: [0, 0, axisLength] },
+  ];
+
+  return (
+    <group>
+      {axes.map((axis) => (
+        <AxisArrow key={axis.label} axis={axis} />
+      ))}
+      <mesh>
+        <sphereGeometry args={[0.08, 24, 24]} />
+        <meshStandardMaterial color="#ffffff" />
+      </mesh>
+    </group>
+  );
+}
+
+function AxisArrow({ axis }) {
+  const tip = axis.dir;
+  const points = useMemo(
+    () => [
+      [0, 0, 0],
+      tip,
+    ],
+    [tip]
+  );
+
+  const direction = useMemo(() => new THREE.Vector3(...tip).normalize(), [tip]);
+
+  return (
+    <group>
+      <Line points={points} color={axis.color} lineWidth={2} depthTest={false} renderOrder={10} />
+      <ArrowHead position={tip} direction={direction} alwaysOnTop color={axis.color} />
+      <Html position={tip} center className="dimension-label dimension-label--static" distanceFactor={18}>
+        {axis.label}
+      </Html>
+    </group>
+  );
+}

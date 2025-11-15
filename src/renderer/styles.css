@@ -54,7 +54,15 @@ body {
 
 .header__actions {
   display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.header__actions-group {
+  display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .workspace__body {
@@ -225,6 +233,34 @@ body {
   color: #ffffff;
 }
 
+.viewport__toggles {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.opacity-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: #cfd9ea;
+}
+
+.opacity-slider input[type='range'] {
+  width: 140px;
+}
+
+.btn--tiny {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.btn--tiny.is-active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .viewport canvas {
   width: 100% !important;
   height: 100% !important;
@@ -254,6 +290,51 @@ body {
   border-radius: 14px;
   color: #8ca6c0;
   font-size: 0.9rem;
+}
+
+.dimension-label {
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.8rem;
+  color: #fdfdfd;
+}
+
+.dimension-label--editing {
+  background: rgba(3, 7, 18, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 0.1rem 0.45rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+}
+
+.dimension-label input {
+  width: 70px;
+  border: none;
+  background: transparent;
+  color: #fefefe;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.dimension-label input:focus {
+  outline: none;
+}
+
+.dimension-label button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dimension-label--static {
+  pointer-events: none;
+  font-weight: 600;
 }
 
 .inspector {
@@ -325,6 +406,18 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
+.btn--primary {
+  background: linear-gradient(120deg, #ff7e5f, #feb47b);
+  color: #0a0c12;
+  box-shadow: 0 12px 25px rgba(255, 126, 95, 0.35);
+}
+
+.btn--primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 @media (max-width: 1200px) {
   .workspace__body {
     grid-template-columns: 1fr;
@@ -334,4 +427,16 @@ body {
   .panel--details {
     min-height: 240px;
   }
+}
+.distance-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.distance-label__axis {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9fb4d6;
 }
